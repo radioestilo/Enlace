@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Radio - Oyente</title>
+    <script src="https://download.agora.io/sdk/release/AgoraRTC_N-4.20.2.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; text-align: center; background: #f0f2f5; padding-top: 100px; }
+        .player { background: white; padding: 50px; border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); display: inline-block; }
+        #btn-play { background: #007bff; color: white; border: none; padding: 20px 50px; font-size: 18px; border-radius: 50px; cursor: pointer; }
+        #btn-play:disabled { background: #ccc; cursor: default; }
+    </style>
+</head>
+<body>
+
+    <div class="player">
+        <h2>📻 Escuchar Radio</h2>
+        <button id="btn-play">▶️ Sintonizar Radio</button>
+        <p id="info">Haz clic para conectar</p>
+    </div>
+
+    <script>
+        const APP_ID = "34d08cd3cc474723ae67342fd6b14da5";
+        const CHANNEL = "sala_principal";
+
+        const client = AgoraRTC.createClient({ mode: "live", codec: "vp8" });
+        client.setClientRole("audience");
+
+        // Cuando el transmisor empieza a hablar:
+        client.on("user-published", async (user, mediaType) => {
+            if (mediaType === "audio") {
+                await client.subscribe(user, mediaType);
+                user.audioTrack.play(); // Play automático al detectar señal
+                document.getElementById("info").innerText = "Conectado. Escuchando ahora...";
+            }
+        });
+
+        document.getElementById("btn-play").onclick = async function() {
+            try {
+                this.disabled = true;
+                this.innerText = "CONECTANDO...";
+                await client.join(APP_ID, CHANNEL, null, null);
+                document.getElementById("info").innerText = "Esperando señal del transmisor...";
+            } catch (e) {
+                console.error(e);
+                this.disabled = false;
+                this.innerText = "REINTENTAR";
+            }
+        };
+    </script>
+</body>
+</html>

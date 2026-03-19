@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Radio Pro - Audio de Sistema</title>
+    <script src="https://download.agora.io/sdk/release/AgoraRTC_N-4.20.2.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; text-align: center; background: #121212; color: #e0e0e0; padding-top: 20px; }
+        .card { background: #1e1e1e; display: inline-block; padding: 30px; border-radius: 20px; box-shadow: 0 8px 32px rgba(0,0,0,0.5); width: 90%; max-width: 500px; border: 1px solid #333; }
+        .controls { margin: 20px 0; display: flex; justify-content: center; gap: 15px; }
+        button { border: none; padding: 12px 25px; font-size: 15px; border-radius: 10px; cursor: pointer; font-weight: bold; transition: 0.2s; }
+        
+        #btn-transmitir { background: #00ff88; color: #000; }
+        #btn-transmitir:hover { background: #00cc6e; }
+        #btn-mute { background: #444; color: white; }
+        #btn-mute.muted { background: #ff4444; }
+
+        .status-box { background: #252525; padding: 15px; border-radius: 10px; margin-bottom: 15px; text-align: left; font-size: 13px; }
+        canvas { width: 100%; height: 120px; background: #000; border-radius: 10px; border: 1px solid #00ff8833; margin-top: 15px; }
+        #estado { color: #00ff88; font-weight: bold; margin-top: 10px; }
+    </style>
+</head>
+<body>
+
+    <div class="card">
+        <h1>🎙️ Transmisor de Sistema</h1>
+        
+        <div class="status-box">
+            <p><strong>Paso 1:</strong> Dale a Transmitir.</p>
+            <p><strong>Paso 2:</strong> Selecciona "Pestaña" o "Toda la pantalla" y marca la casilla <b>"Compartir audio del sistema"</b>.</p>
+        </div>
+
+        <div class="controls">
+            <button id="btn-transmitir">INICIAR STREAM</button>
+            <button id="btn-mute" disabled>MIC ON</button>
+        </div>
+
+        <canvas id="visualizer"></canvas>
+        <p id="estado">Listo para conectar</p>
+    </div>
+
+    <script>
+        const APP_ID = "34d08cd3cc474723ae67342fd6b14da5"; 
+        const CHANNEL = "sala_principal";
+        
+        const client = AgoraRTC.createClient({ mode: "live", codec: "vp8" });
+        client.setClientRole("host");
+
+        let audioContext, mixerDestination, analyzer, localAudioTrack;
+        let micStream, systemStream;
+        let micGainNode;
+
+        const btnTransmitir = document.getElementById("btn-transmitir");
+        const btnMute = document.getElementById("btn-mute");
+        const canvasCtx = document.getElementById('visualizer').getContext('2d');
+
+        btnTransmitir.onclick = async () => {
+            if (btnTransmitir.innerText === "INICIAR STREAM") {
+                await startFullStream();
+            } else {
+                location.reload();
+            }
+        };
+
+        async function startFullStream() {
+            try {
+                // 1. Capturar Audio del Sistema (Tarjeta de sonido)
+                // Esto abrirá una ventana emergente. DEBES marcar "Compartir audio".
+                systemStream = await navigator.mediaDevices.getDisplayMedia({
+                    video: true, // Necesario para que el navegador permita capturar audio del sistema
+                    audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+                });
+
+                // 2. Capturar Micrófono
+                micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+                // 3. Crear Mezclador Web Audio
+                audioContext = new AudioContext();
+                mixerDestination = audioContext.createMediaStreamDestination();
+
+                // Nodo para el sistema
+                const systemSource = audioContext.createMediaStreamSource(systemStream);
+                systemSource.connect(mixerDestination);
+
+                // Nodo para el micrófono con control de Mute
+                const micSource = audioContext.createMediaStreamSource(micStream);
+                micGainNode = audioContext.createGain();
+                micSource.connect(micGainNode);
+                micGainNode.connect(mixerDestination);
+
+                // 4. Visualizador
+                analyzer = audioContext.createAnalyser();
+                mixerDestination.connect(analyzer);
+                startVisualizer();
+
+                // 5. Enviar a Agora
+                await client.join(APP_ID, CHANNEL, null, null);
+                localAudioTrack = AgoraRTC.createCustomAudioTrack({
+                    mediaStreamTrack: mixerDestination.stream.getAudioTracks()[0]
+                });
+                await client.publish([localAudioTrack]);
+
+                // UI
+                btnTransmitir.innerText = "DETENER";
+                btnTransmitir.style.background = "#333";
+                btnTransmitir.style.color = "white";
+                btnMute.disabled = false;
+                document.getElementById("estado").innerText = "🔴 TRANSMITIENDO SISTEMA + MIC";
+
+            } catch (e) {
+                console.error(e);
+                alert("Para capturar el audio del equipo, debes aceptar compartir pantalla y marcar 'Compartir audio'.");
+            }
+        }
+
+        btnMute.onclick = () => {
+            if (micGainNode.gain.value > 0) {
+                micGainNode.gain.setValueAtTime(0, audioContext.currentTime);
+                btnMute.innerText = "MIC OFF";
+                btnMute.classList.add("muted");
+            } else {
+                micGainNode.gain.setValueAtTime(1, audioContext.currentTime);
+                btnMute.innerText = "MIC ON";
+                btnMute.classList.remove("muted");
+            }
+        };
+
+        function startVisualizer() {
+            const bufferLength = analyzer.frequencyBinCount;
+            const dataArray = new Uint8Array(bufferLength);
+            const canvas = document.getElementById('visualizer');
+
+            function draw() {
+                requestAnimationFrame(draw);
+                analyzer.getByteTimeDomainData(dataArray);
+                canvasCtx.fillStyle = '#000';
+                canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
+                canvasCtx.lineWidth = 2;
+                canvasCtx.strokeStyle = '#00ff88';
+                canvasCtx.beginPath();
+                let sliceWidth = canvas.width / bufferLength;
+                let x = 0;
+                for (let i = 0; i < bufferLength; i++) {
+                    let v = dataArray[i] / 128.0;
+                    let y = v * canvas.height / 2;
+                    if (i === 0) canvasCtx.moveTo(x, y);
+                    else canvasCtx.lineTo(x, y);
+                    x += sliceWidth;
+                }
+                canvasCtx.lineTo(canvas.width, canvas.height / 2);
+                canvasCtx.stroke();
+            }
+            draw();
+        }
+    </script>
+</body>
+</html>
