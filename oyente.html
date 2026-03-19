@@ -2,51 +2,110 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>Radio - Oyente</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Radio Pro - Escuchar</title>
     <script src="https://download.agora.io/sdk/release/AgoraRTC_N-4.20.2.js"></script>
     <style>
-        body { font-family: 'Segoe UI', sans-serif; text-align: center; background: #f0f2f5; padding-top: 100px; }
-        .player { background: white; padding: 50px; border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); display: inline-block; }
-        #btn-play { background: #007bff; color: white; border: none; padding: 20px 50px; font-size: 18px; border-radius: 50px; cursor: pointer; }
-        #btn-play:disabled { background: #ccc; cursor: default; }
+        body { font-family: sans-serif; text-align: center; background: #0a0a0a; color: #eee; padding: 20px; }
+        .card { background: #161616; padding: 30px; border-radius: 20px; border: 1px solid #333; max-width: 400px; margin: auto; }
+        .status-badge { display: inline-block; padding: 5px 15px; border-radius: 20px; font-size: 12px; font-weight: bold; text-transform: uppercase; margin-bottom: 20px; }
+        .online { background: #00ff8822; color: #00ff88; border: 1px solid #00ff88; }
+        .offline { background: #ff444422; color: #ff4444; border: 1px solid #ff4444; }
+        
+        button { border: none; padding: 20px; width: 100%; font-size: 18px; border-radius: 15px; cursor: pointer; font-weight: bold; transition: 0.3s; }
+        .btn-play { background: #00ff88; color: #000; box-shadow: 0 0 20px rgba(0, 255, 136, 0.2); }
+        .btn-play:disabled { background: #333; color: #666; cursor: not-allowed; box-shadow: none; }
+        
+        .vol-section { margin-top: 25px; text-align: left; background: #1f1f1f; padding: 15px; border-radius: 10px; }
+        label { display: block; font-size: 10px; color: #888; margin-bottom: 10px; }
+        input[type="range"] { width: 100%; accent-color: #00ff88; }
+        
+        #wave { height: 50px; display: flex; align-items: center; justify-content: center; gap: 3px; margin: 20px 0; }
+        .bar { width: 4px; height: 10px; background: #00ff88; border-radius: 2px; transition: 0.1s; }
     </style>
 </head>
 <body>
 
-    <div class="player">
-        <h2>📻 Escuchar Radio</h2>
-        <button id="btn-play">▶️ Sintonizar Radio</button>
-        <p id="info">Haz clic para conectar</p>
+    <div class="card">
+        <div id="status" class="status-badge offline">Esperando Transmisión...</div>
+        
+        <h2 style="margin: 0 0 10px 0;">📻 Radio Online</h2>
+        <p style="color: #666; font-size: 14px; margin-bottom: 30px;">Sintoniza la señal en vivo</p>
+
+        <div id="wave">
+            <div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div>
+        </div>
+
+        <button id="btn-listen" class="btn-play">TAP PARA ESCUCHAR</button>
+
+        <div class="vol-section">
+            <label>VOLUMEN GENERAL</label>
+            <input type="range" id="vol-master" min="0" max="100" value="80">
+        </div>
     </div>
 
     <script>
-        const APP_ID = "34d08cd3cc474723ae67342fd6b14da5";
-        const CHANNEL = "sala_principal";
-
+        const APP_ID = "b126756822f94ab3ad6caa7738663cbb"; 
+        const CHANNEL = "radio_general";
         const client = AgoraRTC.createClient({ mode: "live", codec: "vp8" });
         client.setClientRole("audience");
 
-        // Cuando el transmisor empieza a hablar:
+        const btn = document.getElementById('btn-listen');
+        const status = document.getElementById('status');
+        const bars = document.querySelectorAll('.bar');
+
+        // Detectar cuando el locutor entra o sale
         client.on("user-published", async (user, mediaType) => {
+            await client.subscribe(user, mediaType);
             if (mediaType === "audio") {
-                await client.subscribe(user, mediaType);
-                user.audioTrack.play(); // Play automático al detectar señal
-                document.getElementById("info").innerText = "Conectado. Escuchando ahora...";
+                user.audioTrack.play();
+                status.innerText = "🔴 EN VIVO AHORA";
+                status.className = "status-badge online";
+                startWave();
             }
         });
 
-        document.getElementById("btn-play").onclick = async function() {
+        client.on("user-unpublished", () => {
+            status.innerText = "FUERA DEL AIRE";
+            status.className = "status-badge offline";
+            stopWave();
+        });
+
+        btn.onclick = async function() {
             try {
                 this.disabled = true;
-                this.innerText = "CONECTANDO...";
+                this.innerText = "CONECTADO";
                 await client.join(APP_ID, CHANNEL, null, null);
-                document.getElementById("info").innerText = "Esperando señal del transmisor...";
+                
+                // Si ya hay alguien transmitiendo, aparecerá automáticamente por el evento user-published
             } catch (e) {
-                console.error(e);
+                alert("Error al conectar: " + e.message);
                 this.disabled = false;
-                this.innerText = "REINTENTAR";
             }
         };
+
+        // Control de volumen
+        document.getElementById('vol-master').oninput = (e) => {
+            const remoteUsers = client.remoteUsers;
+            remoteUsers.forEach(user => {
+                if (user.audioTrack) user.audioTrack.setVolume(parseInt(e.target.value));
+            });
+        };
+
+        // Animación de onda visual
+        let waveInterval;
+        function startWave() {
+            waveInterval = setInterval(() => {
+                bars.forEach(bar => {
+                    const h = Math.floor(Math.random() * 40) + 5;
+                    bar.style.height = h + "px";
+                });
+            }, 150);
+        }
+        function stopWave() {
+            clearInterval(waveInterval);
+            bars.forEach(bar => bar.style.height = "10px");
+        }
     </script>
 </body>
 </html>
