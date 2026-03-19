@@ -3,137 +3,117 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Radio Pro - Inyección Directa</title>
+    <title>Sala de Voz Grupal Pro</title>
     <script src="https://download.agora.io/sdk/release/AgoraRTC_N-4.20.2.js"></script>
     <style>
-        body { font-family: sans-serif; text-align: center; background: #0a0a0a; color: #eee; padding: 20px; }
-        .card { background: #161616; padding: 20px; border-radius: 20px; border: 1px solid #333; max-width: 400px; margin: auto; }
-        button { border: none; padding: 15px; width: 100%; font-size: 16px; border-radius: 10px; cursor: pointer; font-weight: bold; margin-bottom: 10px; }
-        .btn-main { background: #00ff88; color: #000; }
-        #status-info { color: #00ff88; font-size: 12px; margin: 15px 0; border: 1px solid #333; padding: 10px; border-radius: 10px; }
-        .vol-section { background: #1f1f1f; padding: 15px; border-radius: 10px; text-align: left; margin-top: 10px; }
-        input[type="range"] { width: 100%; accent-color: #00ff88; }
+        body { font-family: 'Segoe UI', sans-serif; background: #0a0a0a; color: #eee; text-align: center; padding: 20px; }
+        .card { background: #161616; padding: 30px; border-radius: 20px; border: 1px solid #333; max-width: 400px; margin: auto; }
+        .btn { border: none; padding: 20px; width: 100%; font-size: 18px; border-radius: 12px; cursor: pointer; font-weight: bold; transition: 0.3s; margin-bottom: 15px; }
+        .btn-join { background: #00ff88; color: #000; }
+        .btn-mute { background: #333; color: white; display: none; }
+        .btn-mute.active { background: #ff4444; }
+        #status { margin-top: 20px; font-size: 14px; color: #888; border-top: 1px solid #333; padding-top: 15px; }
+        .user-list { text-align: left; font-size: 12px; margin-top: 10px; color: #00ff88; }
     </style>
 </head>
 <body>
 
     <div class="card">
-        <h3 style="color:#00ff88;">📻 EMISORA PRO V5</h3>
+        <h2 style="color:#00ff88; margin-top:0;">👥 SALA GRUPAL</h2>
+        <p id="instruction">Únete para conversar con los demás</p>
         
-        <div id="setup">
-            <label style="font-size: 10px; color: #888;">SELECCIONA TUS CANCIONES:</label>
-            <input type="file" id="music-files" accept="audio/*" multiple style="margin: 20px 0; width: 100%;">
-            <button id="btn-iniciar" class="btn-main">LANZAR RADIO</button>
-        </div>
+        <button id="btn-entrar" class="btn btn-join">ENTRAR A LA SALA</button>
+        <button id="btn-mute" class="btn btn-mute">🎤 MICRO: ENCENDIDO</button>
 
-        <div id="panel" style="display:none;">
-            <div id="status-info">
-                <div id="track-name">Cargando...</div>
-                <div style="font-size: 10px; color: #666; margin-top: 5px;">ESTADO: TRANSMITIENDO 🔴</div>
-            </div>
-
-            <div class="vol-section">
-                <label style="font-size: 10px; color: #888;">VOLUMEN MÚSICA (PARA OYENTES)</label>
-                <input type="range" id="vol-music" min="0" max="100" step="5" value="50">
-            </div>
-
-            <button id="btn-skip" style="background:#333; color:white; margin-top:15px;">⏭️ SIGUIENTE CANCIÓN</button>
+        <div id="status">
+            <div id="log">Sin conexión</div>
+            <div class="user-list" id="user-count">Participantes: 0</div>
         </div>
     </div>
 
-    <audio id="local-monitor" style="display:none;"></audio>
-
     <script>
         const APP_ID = "b126756822f94ab3ad6caa7738663cbb"; 
-        const CHANNEL = "radio_general";
-        const client = AgoraRTC.createClient({ mode: "live", codec: "vp8" });
+        const CHANNEL = "sala_grupal"; 
+        const client = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" });
         
-        let playlist = [];
-        let currentIndex = 0;
-        let musicTrack; // Track de Agora para la música
-        const monitor = document.getElementById('local-monitor');
+        let micTrack;
+        let isMuted = false;
+        let remoteUsers = {};
 
-        document.getElementById('btn-iniciar').onclick = async function() {
-            const files = document.getElementById('music-files').files;
-            if (files.length === 0) return alert("Elige música primero");
-            
-            playlist = Array.from(files);
-            this.disabled = true;
-            this.innerText = "Conectando...";
-            
-            await iniciarRadio();
-            
-            document.getElementById('setup').style.display = 'none';
-            document.getElementById('panel').style.display = 'block';
-        };
+        const btnEntrar = document.getElementById('btn-entrar');
+        const btnMute = document.getElementById('btn-mute');
+        const log = document.getElementById('log');
+        const userCountDisp = document.getElementById('user-count');
 
-        async function iniciarRadio() {
+        // Escuchar a otros participantes
+        client.on("user-published", async (user, mediaType) => {
+            await client.subscribe(user, mediaType);
+            if (mediaType === "audio") {
+                user.audioTrack.play();
+                remoteUsers[user.uid] = user;
+                actualizarContador();
+            }
+        });
+
+        client.on("user-unpublished", (user) => {
+            delete remoteUsers[user.uid];
+            actualizarContador();
+        });
+
+        // Función de entrada con limpieza de seguridad
+        btnEntrar.onclick = async function() {
             try {
-                client.setClientRole("host");
+                // Bloqueo inmediato para evitar clics dobles
+                this.disabled = true;
+                this.innerText = "CONECTANDO...";
+
+                // SEGURIDAD: Si el cliente ya está conectado o conectando, lo desconectamos primero
+                if (client.connectionState !== "DISCONNECTED") {
+                    await client.leave();
+                }
+                
+                // Unirse al canal de forma limpia
                 await client.join(APP_ID, CHANNEL, null, null);
 
-                // 1. Crear track de Micrófono
-                const micTrack = await AgoraRTC.createMicrophoneAudioTrack();
+                // Crear y publicar micrófono
+                micTrack = await AgoraRTC.createMicrophoneAudioTrack();
+                await client.publish([micTrack]);
 
-                // 2. Crear track de Música desde un archivo directamente
-                // Esto reemplaza al captureStream() fallido
-                musicTrack = await AgoraRTC.createBufferSourceAudioTrack({
-                    source: playlist[currentIndex]
-                });
-
-                // 3. Publicar ambos
-                await client.publish([micTrack, musicTrack]);
-
-                // 4. Iniciar reproducción y monitor local
-                actualizarReproduccion();
-
-                // Controles
-                document.getElementById('vol-music').oninput = (e) => {
-                    musicTrack.setVolume(parseInt(e.target.value));
-                    monitor.volume = e.target.value / 100;
-                };
-
-                document.getElementById('btn-skip').onclick = async () => {
-                    currentIndex++;
-                    if (currentIndex >= playlist.length) currentIndex = 0;
-                    await cambiarPista();
-                };
+                // Interfaz de éxito
+                this.style.display = 'none';
+                btnMute.style.display = 'block';
+                document.getElementById('instruction').innerText = "Estás dentro de la sala";
+                log.innerText = "Conectado - Todos pueden oírte";
+                actualizarContador();
 
             } catch (e) {
-                alert("Error técnico: " + e.message);
-                console.error(e);
+                console.error("Error detectado:", e);
+                this.disabled = false;
+                this.innerText = "REINTENTAR";
+                
+                // Si el error indica que ya estamos dentro, forzamos la interfaz
+                if (e.code === "INVALID_OPERATION") {
+                    this.style.display = 'none';
+                    btnMute.style.display = 'block';
+                } else {
+                    alert("Error al conectar: " + e.message);
+                }
             }
-        }
+        };
 
-        async function actualizarReproduccion() {
-            const file = playlist[currentIndex];
-            document.getElementById('track-name').innerText = "🎵 " + file.name;
-            
-            // Tocar en Agora
-            musicTrack.startProcessAudioBuffer({ loop: false });
-            
-            // Tocar en el móvil local para que tú escuches
-            const url = URL.createObjectURL(file);
-            monitor.src = url;
-            monitor.play();
+        // Control de micrófono (Mute)
+        btnMute.onclick = function() {
+            if (!micTrack) return;
+            isMuted = !isMuted;
+            micTrack.setEnabled(!isMuted);
+            this.classList.toggle('active', isMuted);
+            this.innerText = isMuted ? "🔇 MICRO: SILENCIADO" : "🎤 MICRO: ENCENDIDO";
+            log.innerText = isMuted ? "No te escuchan (Mute)" : "Transmitiendo audio perfectamente";
+        };
 
-            // Al terminar la pista
-            musicTrack.on("process-audio-buffer-on-ended", async () => {
-                currentIndex++;
-                if (currentIndex >= playlist.length) currentIndex = 0;
-                await cambiarPista();
-            });
-        }
-
-        async function cambiarPista() {
-            // Detener lo anterior
-            musicTrack.stopProcessAudioBuffer();
-            
-            // Cargar nueva fuente en el mismo track
-            const file = playlist[currentIndex];
-            await musicTrack.setSource(file);
-            
-            actualizarReproduccion();
+        function actualizarContador() {
+            const count = Object.keys(remoteUsers).length + 1;
+            userCountDisp.innerText = `En la sala: ${count} personas`;
         }
     </script>
 </body>
