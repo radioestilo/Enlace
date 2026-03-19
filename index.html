@@ -3,182 +3,137 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Radio Móvil Pro - Playlist</title>
+    <title>Radio Pro - Inyección Directa</title>
     <script src="https://download.agora.io/sdk/release/AgoraRTC_N-4.20.2.js"></script>
     <style>
-        body { font-family: 'Segoe UI', sans-serif; text-align: center; background: #0f0f0f; color: #e0e0e0; padding: 20px; margin: 0; }
-        .card { background: #1a1a1a; padding: 20px; border-radius: 20px; border: 1px solid #333; max-width: 400px; margin: auto; }
-        
-        button { border: none; padding: 15px; width: 100%; font-size: 16px; border-radius: 12px; cursor: pointer; font-weight: bold; transition: 0.2s; margin-bottom: 10px; }
+        body { font-family: sans-serif; text-align: center; background: #0a0a0a; color: #eee; padding: 20px; }
+        .card { background: #161616; padding: 20px; border-radius: 20px; border: 1px solid #333; max-width: 400px; margin: auto; }
+        button { border: none; padding: 15px; width: 100%; font-size: 16px; border-radius: 10px; cursor: pointer; font-weight: bold; margin-bottom: 10px; }
         .btn-main { background: #00ff88; color: #000; }
-        .btn-skip { background: #333; color: #fff; border: 1px solid #555; font-size: 14px; }
-        .btn-mute { background: #222; color: white; border: 1px solid #444; }
-        .btn-mute.active { background: #ff4444; }
-
-        .vol-section { text-align: left; background: #222; padding: 15px; border-radius: 12px; margin: 15px 0; }
-        label { display: block; font-size: 11px; color: #888; margin-bottom: 5px; text-transform: uppercase; }
-        input[type="range"] { width: 100%; accent-color: #00ff88; margin-bottom: 10px; }
-        
-        .playlist-info { background: #000; padding: 10px; border-radius: 10px; margin-bottom: 15px; font-size: 13px; border-left: 4px solid #00ff88; text-align: left; }
-        canvas { width: 100%; height: 80px; background: #000; border-radius: 10px; border: 1px solid #00ff8822; }
+        #status-info { color: #00ff88; font-size: 12px; margin: 15px 0; border: 1px solid #333; padding: 10px; border-radius: 10px; }
+        .vol-section { background: #1f1f1f; padding: 15px; border-radius: 10px; text-align: left; margin-top: 10px; }
+        input[type="range"] { width: 100%; accent-color: #00ff88; }
     </style>
 </head>
 <body>
 
     <div class="card">
-        <h2 style="color:#00ff88; margin-top:0;">📻 RADIO PLAYLIST</h2>
+        <h3 style="color:#00ff88;">📻 EMISORA PRO V5</h3>
         
         <div id="setup">
-            <label>Selecciona varias canciones (MP3):</label>
-            <input type="file" id="music-files" accept="audio/*" multiple>
-            <button id="btn-iniciar" class="btn-main">INICIAR CON PLAYLIST</button>
+            <label style="font-size: 10px; color: #888;">SELECCIONA TUS CANCIONES:</label>
+            <input type="file" id="music-files" accept="audio/*" multiple style="margin: 20px 0; width: 100%;">
+            <button id="btn-iniciar" class="btn-main">LANZAR RADIO</button>
         </div>
 
         <div id="panel" style="display:none;">
-            <div class="playlist-info">
-                <div id="now-playing"><b>Sonando:</b> ---</div>
-                <div id="next-track" style="color: #888; margin-top: 5px;"><b>Siguiente:</b> ---</div>
+            <div id="status-info">
+                <div id="track-name">Cargando...</div>
+                <div style="font-size: 10px; color: #666; margin-top: 5px;">ESTADO: TRANSMITIENDO 🔴</div>
             </div>
-
-            <button id="btn-skip" class="btn-skip">⏭️ SALTAR CANCIÓN</button>
 
             <div class="vol-section">
-                <label>Volumen Voz</label>
-                <input type="range" id="vol-mic" min="0" max="1" step="0.1" value="1">
-                <label>Volumen Música</label>
-                <input type="range" id="vol-music" min="0" max="1" step="0.1" value="0.5">
+                <label style="font-size: 10px; color: #888;">VOLUMEN MÚSICA (PARA OYENTES)</label>
+                <input type="range" id="vol-music" min="0" max="100" step="5" value="50">
             </div>
 
-            <button id="btn-mute" class="btn-mute">🎤 MICROFONO ACTIVADO</button>
-            <canvas id="visualizer"></canvas>
-            <p id="status" style="color:#00ff88; font-weight:bold;">🔴 EN VIVO</p>
+            <button id="btn-skip" style="background:#333; color:white; margin-top:15px;">⏭️ SIGUIENTE CANCIÓN</button>
         </div>
     </div>
 
+    <audio id="local-monitor" style="display:none;"></audio>
+
     <script>
-        const APP_ID = "b126756822f94ab3ad6caa7738663cbb";
+        const APP_ID = "b126756822f94ab3ad6caa7738663cbb"; 
         const CHANNEL = "radio_general";
         const client = AgoraRTC.createClient({ mode: "live", codec: "vp8" });
-        client.setClientRole("host");
-
-        let audioCtx, mixer, micGain, musicGain, analyzer, localTrack, musicSource;
+        
         let playlist = [];
         let currentIndex = 0;
+        let musicTrack; // Track de Agora para la música
+        const monitor = document.getElementById('local-monitor');
 
         document.getElementById('btn-iniciar').onclick = async function() {
             const files = document.getElementById('music-files').files;
-            if (files.length === 0) return alert("Selecciona al menos una canción.");
+            if (files.length === 0) return alert("Elige música primero");
             
             playlist = Array.from(files);
             this.disabled = true;
-            await iniciarTransmision();
+            this.innerText = "Conectando...";
+            
+            await iniciarRadio();
+            
             document.getElementById('setup').style.display = 'none';
             document.getElementById('panel').style.display = 'block';
         };
 
-        async function iniciarTransmision() {
+        async function iniciarRadio() {
             try {
-                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-                mixer = audioCtx.createMediaStreamDestination();
-
-                // 1. Micrófono
-                const micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                const micSource = audioCtx.createMediaStreamSource(micStream);
-                micGain = audioCtx.createGain();
-                micSource.connect(micGain).connect(mixer);
-
-                // 2. Iniciar Playlist
-                musicGain = audioCtx.createGain();
-                musicGain.gain.value = document.getElementById('vol-music').value;
-                musicGain.connect(mixer);
-                await playNextTrack();
-
-                // 3. Visualizador
-                analyzer = audioCtx.createAnalyser();
-                mixer.connect(analyzer);
-                draw();
-
-                // 4. Agora
+                client.setClientRole("host");
                 await client.join(APP_ID, CHANNEL, null, null);
-                localTrack = AgoraRTC.createCustomAudioTrack({
-                    mediaStreamTrack: mixer.stream.getAudioTracks()[0]
+
+                // 1. Crear track de Micrófono
+                const micTrack = await AgoraRTC.createMicrophoneAudioTrack();
+
+                // 2. Crear track de Música desde un archivo directamente
+                // Esto reemplaza al captureStream() fallido
+                musicTrack = await AgoraRTC.createBufferSourceAudioTrack({
+                    source: playlist[currentIndex]
                 });
-                await client.publish([localTrack]);
+
+                // 3. Publicar ambos
+                await client.publish([micTrack, musicTrack]);
+
+                // 4. Iniciar reproducción y monitor local
+                actualizarReproduccion();
 
                 // Controles
-                document.getElementById('vol-mic').oninput = (e) => micGain.gain.value = e.target.value;
-                document.getElementById('vol-music').oninput = (e) => musicGain.gain.value = e.target.value;
+                document.getElementById('vol-music').oninput = (e) => {
+                    musicTrack.setVolume(parseInt(e.target.value));
+                    monitor.volume = e.target.value / 100;
+                };
+
+                document.getElementById('btn-skip').onclick = async () => {
+                    currentIndex++;
+                    if (currentIndex >= playlist.length) currentIndex = 0;
+                    await cambiarPista();
+                };
 
             } catch (e) {
-                alert("Error: " + e.message);
-                location.reload();
+                alert("Error técnico: " + e.message);
+                console.error(e);
             }
         }
 
-        async function playNextTrack() {
-            if (currentIndex >= playlist.length) {
-                currentIndex = 0; // Reiniciar playlist al terminar
-            }
-
+        async function actualizarReproduccion() {
             const file = playlist[currentIndex];
-            document.getElementById('now-playing').innerHTML = `<b>Sonando:</b> ${file.name}`;
+            document.getElementById('track-name').innerText = "🎵 " + file.name;
             
-            const nextFile = playlist[currentIndex + 1] || playlist[0];
-            document.getElementById('next-track').innerHTML = `<b>Siguiente:</b> ${nextFile.name}`;
+            // Tocar en Agora
+            musicTrack.startProcessAudioBuffer({ loop: false });
+            
+            // Tocar en el móvil local para que tú escuches
+            const url = URL.createObjectURL(file);
+            monitor.src = url;
+            monitor.play();
 
-            if (musicSource) musicSource.stop();
-
-            const arrayBuffer = await file.arrayBuffer();
-            const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-            
-            musicSource = audioCtx.createBufferSource();
-            musicSource.buffer = audioBuffer;
-            musicSource.connect(musicGain);
-            
-            // Evento cuando termina la canción actual
-            musicSource.onended = () => {
+            // Al terminar la pista
+            musicTrack.on("process-audio-buffer-on-ended", async () => {
                 currentIndex++;
-                playNextTrack();
-            };
-
-            musicSource.start(0);
+                if (currentIndex >= playlist.length) currentIndex = 0;
+                await cambiarPista();
+            });
         }
 
-        document.getElementById('btn-skip').onclick = () => {
-            currentIndex++;
-            playNextTrack();
-        };
-
-        document.getElementById('btn-mute').onclick = function() {
-            if (micGain.gain.value > 0) {
-                micGain.gain.value = 0;
-                this.innerText = "🔇 MICROFONO APAGADO";
-                this.classList.add('active');
-            } else {
-                micGain.gain.value = document.getElementById('vol-mic').value;
-                this.innerText = "🎤 MICROFONO ACTIVADO";
-                this.classList.remove('active');
-            }
-        };
-
-        function draw() {
-            const canvas = document.getElementById('visualizer');
-            const ctx = canvas.getContext('2d');
-            const data = new Uint8Array(analyzer.frequencyBinCount);
-            function render() {
-                requestAnimationFrame(render);
-                analyzer.getByteTimeDomainData(data);
-                ctx.fillStyle = '#000'; ctx.fillRect(0,0,canvas.width, canvas.height);
-                ctx.lineWidth = 2; ctx.strokeStyle = '#00ff88'; ctx.beginPath();
-                let x = 0; let slice = canvas.width/data.length;
-                for(let i=0; i<data.length; i++) {
-                    let v = data[i]/128.0; let y = v * canvas.height/2;
-                    if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
-                    x+=slice;
-                }
-                ctx.stroke();
-            }
-            render();
+        async function cambiarPista() {
+            // Detener lo anterior
+            musicTrack.stopProcessAudioBuffer();
+            
+            // Cargar nueva fuente en el mismo track
+            const file = playlist[currentIndex];
+            await musicTrack.setSource(file);
+            
+            actualizarReproduccion();
         }
     </script>
 </body>
